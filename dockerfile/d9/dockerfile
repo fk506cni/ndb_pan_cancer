@@ -1,0 +1,367 @@
+# Copyright (c) Jupyter Development Team.
+# Distributed under the terms of the Modified BSD License.
+# ARG OWNER=jupyter
+# ARG BASE_CONTAINER=$OWNER/scipy-notebook
+# FROM $BASE_CONTAINER
+FROM jupyter/datascience-notebook:python-3.10.11
+
+LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
+
+# Fix: https://github.com/hadolint/hadolint/wiki/DL4006
+# Fix: https://github.com/koalaman/shellcheck/wiki/SC3014
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+USER root
+
+
+# Setup OS and core packages
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y -q \
+    software-properties-common \
+    gdebi \
+    dirmngr \
+    gpg-agent \
+    strace \
+    lsof \
+    less \
+    apt-utils \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    gfortran \
+    git \
+    google-perftools \
+    libatlas-base-dev \
+    libfreetype6-dev \
+    libhdf5-dev \
+    liblapack-dev \
+    libpng-dev \
+    libsm6 \
+    libxext6 \
+    libxft-dev \
+    libxml2-dev \
+    openssh-client \
+    pkg-config \
+    rsync \
+    unzip \
+    wget \
+    zip \
+    cifs-utils \
+    vim \
+    pv \
+    pigz \
+    pbzip2 \
+    tzdata \
+    nmon \
+    htop \
+    glances \
+    bibutils \
+    language-pack-ja \
+    && update-locale LANG=ja_JP.UTF-8 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# Julia installation
+# Default values can be overridden at build time
+# (ARGS are in lower case to distinguish them from ENV)
+# Check https://julialang.org/downloads/
+ARG julia_version="1.9.2"
+
+# R pre-requisites
+RUN apt-get update --yes && \
+    apt-get install --yes --no-install-recommends \
+    fonts-dejavu \
+    gfortran \
+    gcc && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Julia dependencies
+# install Julia packages in /opt/julia instead of ${HOME}
+ENV JULIA_DEPOT_PATH=/opt/julia \
+    JULIA_PKGDIR=/opt/julia \
+    JULIA_VERSION="${julia_version}"
+
+WORKDIR /tmp
+
+# # hadolint ignore=SC2046
+# RUN set -x && \
+#     julia_arch=$(uname -m) && \
+#     julia_short_arch="${julia_arch}" && \
+#     if [ "${julia_short_arch}" == "x86_64" ]; then \
+#       julia_short_arch="x64"; \
+#     fi; \
+#     julia_installer="julia-${JULIA_VERSION}-linux-${julia_arch}.tar.gz" && \
+#     julia_major_minor=$(echo "${JULIA_VERSION}" | cut -d. -f 1,2) && \
+#     \mkdir "/opt/julia-${JULIA_VERSION}" && \
+#     wget -q "https://julialang-s3.julialang.org/bin/linux/${julia_short_arch}/${julia_major_minor}/${julia_installer}" && \
+#     tar xzf "${julia_installer}" -C "/opt/julia-${JULIA_VERSION}" --strip-components=1 && \
+#     rm "${julia_installer}" && \
+#     ln -fs /opt/julia-*/bin/julia /usr/local/bin/julia
+
+# Show Julia where conda libraries are \
+# RUN mkdir /etc/julia && \
+#     echo "push!(Libdl.DL_LOAD_PATH, \"${CONDA_DIR}/lib\")" >> /etc/julia/juliarc.jl && \
+#     # Create JULIA_PKGDIR \
+#     mkdir "${JULIA_PKGDIR}" && \
+#     chown "${NB_USER}" "${JULIA_PKGDIR}" && \
+#     fix-permissions "${JULIA_PKGDIR}"
+
+USER ${NB_UID}
+
+# R packages including IRKernel which gets installed globally.
+# r-e1071: dependency of the caret R package
+RUN conda  install --yes mamba
+
+RUN mamba install --yes \
+    "dwave-neal" "pyodbc" "pymongo" "optuna" "optuna-dashboard" "dwave-ocean-sdk" "jupyterlab" \
+    "openpyxl" \
+    "polars" \
+    "vaex==4.16.0" \
+    "vaex-server==0.8.1"\
+    "vaex-viz==0.5.4"\
+    "vaex-astro==0.9.3"\
+    "vaex-core==4.16.0"\
+    "vaex-jupyter==0.8.1"\
+    "vaex-ml==0.18.1"\
+    'rpy2' \
+    'r-base' \
+    'r-caret' \
+    'r-crayon' \
+    'r-devtools' \
+    'r-e1071' \
+    'r-forecast' \
+    'r-hexbin' \
+    'r-htmltools' \
+    'r-htmlwidgets' \
+    'r-irkernel' \
+    'r-nycflights13' \
+    'r-randomforest' \
+    'r-rcurl' \
+    'r-rmarkdown' \
+    'r-rodbc' \
+    'r-rsqlite' \
+    'r-shiny' \
+    'r-tidymodels' \
+    'r-tidyverse' \
+    r-openxlsx \
+    r-ggpubr \
+    r-cowplot \
+    r-officer==0.5.2 \
+    r-table1 \
+    r-tableone \
+    r-rsvg \
+    r-rvg \
+    r-svglite \
+    r-png \
+    r-jpeg \
+    r-survminer \
+    r-dt \
+    r-jsonlite \
+    r-lme4 \
+    r-igraph \
+    r-rstan \
+    r-naniar \
+    r-vim \
+    r-mice \
+    r-r.utils \
+    r-knitr \
+    r-extrafont \
+    r-extrafontdb \
+    r-conflicted \
+    r-arrow \
+    r-doParallel \
+    r-tictoc \
+    'unixodbc' && \
+    mamba clean --all -f -y && \
+    fix-permissions "${CONDA_DIR}" && \
+    fix-permissions "/home/${NB_USER}"
+
+RUN mamba install -y -c r r-webp r-jm 
+  
+# RUN mamba uninstall --yes nodejs 
+
+
+# vaexに必要
+RUN mamba install --yes \
+    -c conda-forge \
+    'importlib_metadata=6.8.0'\
+    'pygments=2.16.1'\
+    'numexpr=2.8.4' \
+    'pydantic=1.10.12' && \
+    mamba clean --all -f -y && \
+    fix-permissions "${CONDA_DIR}" && \
+    fix-permissions "/home/${NB_USER}"
+
+
+RUN pip install pyqubo neo4j-runway
+RUN mamba install  --yes \
+     -c rapidsai cudf && \
+    mamba clean --all -f -y && \
+    fix-permissions "${CONDA_DIR}" && \
+    fix-permissions "/home/${NB_USER}"
+
+# Add Julia packages.
+# Install IJulia as jovyan and then move the kernelspec out
+# to the system share location. Avoids problems with runtime UID change not
+# taking effect properly on the .local folder in the jovyan home dir.
+
+# 
+
+# ENV JULIA_SSL_NO_VERIFY_HOSTS="pkg.julialang.org"
+# https://discourse.julialang.org/t/general-registry-delays-and-a-workaround/67537
+
+RUN julia -e 'import Pkg; Pkg.Registry.rm("General"); ENV["JULIA_PKG_SERVER"] = ""; Pkg.Registry.add("General")' 
+RUN julia -e 'import Pkg; Pkg.update()' 
+RUN julia -e 'import Pkg; Pkg.add("HDF5")' && \
+    julia -e 'import Pkg; Pkg.add("Tables")' && \
+    julia -e 'import Pkg; Pkg.add("Mongoc")' && \
+    julia -e 'import Pkg; Pkg.add("IndexedTables")' && \
+    julia -e 'import Pkg; Pkg.add("DataFrames")' && \
+    julia -e 'import Pkg; Pkg.add("CSV")' && \
+    julia -e 'import Pkg; Pkg.add("XLSX")' && \
+    julia -e 'import Pkg; Pkg.add("BSON")' && \
+    julia -e 'import Pkg; Pkg.add("Dictionaries")' && \
+    julia -e 'import Pkg; Pkg.add("JSON")' && \
+    julia -e 'import Pkg; Pkg.add("EzXML")' && \
+    julia -e 'import Pkg; Pkg.add("JLD2")' && \
+    julia -e 'import Pkg; Pkg.add("Plots")' && \
+    julia -e 'import Pkg; Pkg.add("LightXML")' && \
+    julia -e 'import Pkg; Pkg.add("DataStructures")' && \
+    julia -e 'import Pkg; Pkg.add("Query")' && \
+    julia -e 'import Pkg; Pkg.add("DataFramesMeta")' && \
+    julia -e 'import Pkg; Pkg.add("TidierData")' && \
+    julia -e 'import Pkg; Pkg.add("BenchmarkTools")' && \
+    julia -e 'import Pkg; Pkg.add("Symbolics")' && \
+    julia -e 'import Pkg; Pkg.add("FileIO")' && \
+    julia -e 'import Pkg; Pkg.add("CodecZlib")' && \
+    julia -e 'import Pkg; Pkg.add("CodecBzip2")' && \
+    julia -e 'import Pkg; Pkg.add("CodecLz4")' && \
+    julia -e 'import Pkg; Pkg.add("StructArrays")' && \
+    julia -e 'import Pkg; Pkg.add("NamedTupleTools")' && \
+    julia -e 'import Pkg; Pkg.add("CodecZstd")' && \
+    julia -e 'import Pkg; Pkg.add("SQLite")' && \
+    julia -e 'import Pkg; Pkg.add("ShiftedArrays")' && \
+    julia -e 'import Pkg; Pkg.add("OrderedCollections")' && \
+    julia -e 'using Pkg; pkg"add IJulia"; pkg"precompile"' && \
+    # move kernelspec out of home \
+    # mv "${HOME}/.local/share/jupyter/kernels/julia"* "${CONDA_DIR}/share/jupyter/kernels/" && \
+    chmod -R go+rx "${CONDA_DIR}/share/jupyter" && \
+    rm -rf "${HOME}/.local" && \
+    fix-permissions "${JULIA_PKGDIR}" "${CONDA_DIR}/share/jupyter"
+
+
+RUN  julia -e 'import Pkg; Pkg.add("TranscodingStreams")' && \
+    julia -e 'import Pkg; Pkg.add("GZip")' && \ 
+    julia -e 'import Pkg; Pkg.add("MsgPack")' && \ 
+    julia -e 'import Pkg; Pkg.add("UUIDs")' && \ 
+    julia -e 'using Pkg; pkg"add IJulia"; pkg"precompile"' && \
+    # move kernelspec out of home \
+    # mv "${HOME}/.local/share/jupyter/kernels/julia"* "${CONDA_DIR}/share/jupyter/kernels/" && \
+    chmod -R go+rx "${CONDA_DIR}/share/jupyter" && \
+    rm -rf "${HOME}/.local" && \
+    fix-permissions "${JULIA_PKGDIR}" "${CONDA_DIR}/share/jupyter"
+
+
+WORKDIR "${HOME}"
+
+
+USER root
+
+# MSフォント
+RUN apt-get update && \
+    apt-get install -y cabextract libfontenc1 libmspack0 xfonts-encodings xfonts-utils \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+RUN wget http://ftp.de.debian.org/debian/pool/contrib/m/msttcorefonts/ttf-mscorefonts-installer_3.8.1_all.deb && \
+    dpkg -i ttf-mscorefonts-installer_3.8.1_all.deb && \
+    rm ttf-mscorefonts-installer_3.8.1_all.deb
+# 日本語フォントをインストール
+RUN apt-get update && apt-get install -y \
+    fonts-ipaexfont \
+    fonts-noto-cjk \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+# matplolibのキャッシュ消してフォントをリセット
+RUN rm -rf /home/jovyan/.cache/matplotlib
+
+# R studio
+RUN apt-get update --yes && \
+    apt-get install --yes --no-install-recommends \
+    lsb-release software-properties-common  gdebi
+
+RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc
+RUN add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/"
+RUN wget https://download2.rstudio.org/server/jammy/amd64/rstudio-server-2023.09.0-463-amd64.deb
+RUN gdebi --non-interactive rstudio-server-2023.09.0-463-amd64.deb \
+    && rm rstudio-server-2023.09.0-463-amd64.deb
+RUN pip install \
+    jupyter-rsession-proxy \
+    jupyter-server-proxy \
+    && (python3 -m pip cache purge || true)
+
+RUN R -e "install.packages('lawstat', repos='https://cloud.r-project.org/', ask = FALSE)" \
+    && rm -rf /tmp/downloaded_packages/ /tmp/*.rds 
+
+# RUN mamba install -y -c conda-forge \
+
+RUN mamba install -y -c r r-webp r-jm \
+    && mamba clean -a -y
+
+# tidyverse用: 前段のmambaでまとめてインストールしているコードより先に実行するとtidyverseを正常にロードしない
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y -q \
+    libicu-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+RUN mamba update -y \
+    r-stringi \
+    r-dplyr \
+    r-tidyverse
+
+# RUN wget https://www.openssl.org/source/old/3.2/openssl-3.2.0.tar.gz
+# RUN tar -xf openssl-3.2.0.tar.gz
+# RUN cd openssl-3.2.0  &&  ./config
+# RUN cd openssl-3.2.0  &&  make
+# RUN cd openssl-3.2.0  &&  make install 
+
+RUN echo "rsession-ld-library-path=/opt/conda/lib" >> /etc/rstudio/rserver.conf 
+
+ENV TZ=Asia/Tokyo
+
+
+WORKDIR "${HOME}"
+RUN echo -e $'#!/bin/bash\n\
+echo "loading!"\n\
+jupyter lab \n\
+' \
+>> ~/doc_start.sh
+
+USER root
+RUN apt update
+RUN apt install -y vim
+RUN apt install -y nmon
+
+RUN chmod +x doc_start.sh
+RUN cp doc_start.sh /usr/local/bin/
+# RUN usermod -aG rstudio-server jovyan
+
+
+# RUN apt-get install build-essential
+
+
+USER ${NB_UID}
+
+# RUN python -m jupyterlab.labapp build
+# RUN jupyter lab build --dev-build=False --minimize=False
+
+
+RUN mkdir /home/jovyan/share1
+RUN mkdir /home/jovyan/share2
+RUN mkdir /home/jovyan/share3
+RUN mkdir /home/jovyan/drive
+RUN mkdir /home/jovyan/storage
+RUN mkdir /home/jovyan/private
+RUN mkdir /home/jovyan/unknown
