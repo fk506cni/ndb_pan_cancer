@@ -1,0 +1,18 @@
+
+
+patients dist
+
+julia->R
+p5_n01_id1n_dist.ipynb
+"../../../../storage/d_id1c/id1ns_smr_s_255.csv"
+r6_table and vis
+
+cost
+p4_j03_smr_tablation_funcin_cost_eachym_par
+p5_n02_id1n_costdist
+julia -> R
+r7_cancer and cost
+
+iy limit
+p4_j03_smr_tablation_funcin_usage_iy_dpfix
+p5_n03_iy_cost_dist.ipynb

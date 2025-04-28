@@ -1,0 +1,169 @@
+---
+title: "r9_cost_age_grade"
+author: "fk506cni"
+date: "2025-01-07"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r}
+require(tidyverse)
+require(openxlsx)
+require(data.table)
+require(tictoc)
+require(ggpubr)
+require(extrafont)
+require(officer)
+loadfonts(quiet = T)
+```
+
+
+# definition; ggsave2_tri, sv2ggkm
+```{r}
+
+outputdir <- "./figs/"
+if(!dir.exists(outputdir)){
+  dir.create(outputdir)
+}
+
+ggsave2_tri <- function(plot, wid = 9, hei=9){
+  plot_name <- deparse(substitute(plot))
+  
+  #png
+  file_name <- paste(outputdir,plot_name, ".png", sep = "",collapse = "")
+  ggsave(filename = file_name,plot = plot,device = "png",width = wid, height = hei,dpi = 300,units = "cm")
+  
+  
+  #pdf
+  file_name <- paste(outputdir,plot_name, ".pdf", sep = "",collapse = "")
+
+  #pptx
+  file_name <- paste(outputdir,plot_name, ".pptx", sep = "",collapse = "")
+  plot_ed <- rvg::dml(ggobj = plot,width = wid, height = hei)
+  
+  doc <- read_pptx() %>%
+    add_slide('Title and Content', 'Office Theme') %>%
+    ph_with(value = "", location = ph_location_type(type = "title")) %>%
+    ph_with(value = plot_ed, location = ph_location(type = "body",width = cm2inch(wid), height = cm2inch(hei),left = 2, top = 2))
+  doc %>%
+    print(target = file_name)
+}
+
+inch2cm <- function(x){
+  return(x/0.39370)
+}
+cm2inch <- function(x){
+  return(0.39370*x)
+}
+
+p2cm <- function(x){
+  return(as.integer(0.008466666666666667 * x))
+}
+
+cm2p <- function(x){
+  return(as.integer(118.11023622047244 *x))
+}
+
+sv2ggkm <- function(svfit, df){
+  p <- ggsurvplot(fit = svfit, data = df,
+                risk.table.title = "risk.table.title", risk.table.y.text.col = TRUE,
+           risk.table.y.text = FALSE, fontsize = 5,
+           risk.table = TRUE, tables.theme = theme_pubr(), ggtheme = theme_pubr())
+  p_km <- p$plot
+  p_tb <- p$table
+  p2 <- cowplot::plot_grid(p_km, p_tb, ncol = 1,align = "v", rel_heights = c(3,1))
+  grid::grid.draw(p2)
+  return(p2)
+}
+```
+
+
+
+```{r}
+eval_span <- c(201103, 202204)
+```
+
+```{r}
+df_age <- data.frame(
+  ind = 0:16
+) %>% 
+  mutate(a1 = (ind )* 5 ,
+         a2 = (ind )* 5 + 4 ) %>% 
+  mutate(a1 = a1 %>% as.character(),
+         a2 = a2 %>% as.character()) %>% 
+  mutate(ages = str_c(a1, a2, sep="-") %>% 
+           str_remove("84")) %>% 
+  mutate(age = 100 + ind)  %>% 
+  mutate(ages = factor(ages, levels=ages)) %>% 
+  mutate(a3 = as.numeric(ages)-2,
+         a4 = ceiling(a3/2) %>% 
+           as.character() %>% 
+           str_c(., "0~", sep=""),
+         ages10 = factor(a4))
+# df_age$ages10
+```
+
+
+
+```{r}
+f <- "../../../../storage/smr_age_cost/age_cost_smr.csv"
+df_org <- readr::read_csv(f) %>% 
+  filter(cancer != "NoCancers") %>% 
+  filter(eval_span[1] < ym) %>% 
+  filter(ym < eval_span[2]) %>% 
+  left_join(df_age,by="age") %>% 
+  group_by(ym, ages10) %>% 
+  summarise(n=sum(count),
+            cost = 10 * sum(totalpoint)) %>% 
+  mutate(ymd = ym %>% 
+           as.character() %>% 
+           str_c(.,"15", sep="") %>% 
+           lubridate::ymd()) %>% 
+  mutate(cost_per_personmonth = cost/n)
+df <- df_org%>% 
+  tidyr::pivot_longer(cols = c("n", "cost", "cost_per_personmonth")) %>% 
+  mutate(name = factor(name, levels=c("n", "cost","cost_per_personmonth")))
+
+
+```
+
+```{r}
+p_age_cost_dist <- ggplot()+theme_pubr(base_family = "Times", legend = "right")+
+  geom_line(data = df,
+           aes(x=ymd, y=value, color=ages10))+
+  facet_wrap(~name, ncol = 1, scales = "free", strip.position = "left")+
+  coord_cartesian(expand = F, ylim = )
+p_age_cost_dist
+
+
+ggsave2_tri(p_age_cost_dist,
+            wid = 18, hei = 15)
+```
+
+```{r}
+df_y <- df_org %>% 
+  mutate(y = ym %>% 
+           as.character() %>% 
+           str_sub(1,4) %>% 
+           as.numeric()
+         ) %>% 
+  group_by(y) %>% 
+  summarise(n=sum(n),
+            cost = sum(cost)) %>% 
+  pivot_longer(cols=c("n", "cost"))
+
+p_y <-ggplot()+theme_pubr(base_family = "Times")+
+  geom_line(data = df_y,
+           aes(x=y, y=value))+
+  facet_wrap(~name, ncol = 1, scales = "free_y")
+p_y
+
+ggsave2_tri(p_y)
+```
+
+```{r}
+sessionInfo()
+```
+

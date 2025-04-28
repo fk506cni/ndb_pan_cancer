@@ -1,0 +1,192 @@
+---
+title: "r6_table_and_vis_whole"
+output: html_document
+date: "2024-04-25"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+require(tidyverse)
+require(openxlsx)
+require(data.table)
+require(table1)
+# require(doParallel)
+require(parallel)
+require(tictoc)
+require(arrow)
+
+require(ggpubr)
+require(extrafont)
+loadfonts(quiet = T)
+```
+
+```{r}
+# stat_eval_span <- c(201301, 201512)
+```
+
+```{r}
+f_m <- "../../../ndb_pancan/dicts/code2location.csv"
+df_m <- fread(f_m)
+
+f_mst <- "../S767_master_integration/dat/CI5-XII/cancer_summary.txt"
+df_m <- fread(f_mst) %>% 
+  filter(CANCER <= 60)
+canc_f <- c(df_m$LABEL, "multiple")
+```
+
+
+```{r}
+d_in <- "../../../../storage/d_id1c"
+# id1ns_smr_s_000.csv
+fs <- list.files(path = d_in ,pattern = "*.csv", full.names = T) %>% 
+  .[str_detect(.,"id1ns_smr_s_")]
+```
+
+
+```{r}
+df_age <- data.frame(
+  ind = 0:16
+) %>% 
+  mutate(a1 = (ind )* 5 ,
+         a2 = (ind )* 5 + 4 ) %>% 
+  mutate(a1 = a1 %>% as.character(),
+         a2 = a2 %>% as.character()) %>% 
+  mutate(ages = str_c(a1, a2, sep="-") %>% 
+           str_remove("84")) %>% 
+  mutate(age = 100 + ind)  %>% 
+  mutate(ages = factor(ages, levels=ages)) %>% 
+  select(age, ages)
+```
+
+
+```{r}
+l_df <- list()
+i <- 1
+for (f in fs){
+  print(f)
+  df_f <- fread(f)   %>%
+    filter(main_cancer != "") %>%
+    filter(main_cancer != "NoCancers") %>% 
+    mutate(main_cancer_category = if_else(str_detect(main_cancer, "_"),
+                                        "multiple",
+                                        main_cancer)) %>% 
+    mutate(main_cancer_category = factor(main_cancer_category, levels = canc_f)) %>% 
+    # select(main_cancer_category,
+    #        gender,
+    #        ym_count,
+    #        age)  %>% 
+    left_join(df_age, by="age")
+  # filter(stat_eval_span[1] <= first_ym) %>%
+  # filter(first_ym <= stat_eval_span[2])
+  # l_df[[i]] <- df_f
+  i <- i +1
+
+  break
+}
+
+# cans <- 
+# df <- data.table::rbindlist(l_df)%>%
+#   mutate(main_cancer_category = if_else(str_detect(main_cancer, "_"),
+#                                         "multiple",
+#                                         main_cancer))
+```
+
+```{r}
+# require(curl)
+```
+
+
+```{r}
+read_and_extract_lim <-function(f){
+  print(f)
+  df_f <- fread(f) %>% 
+    filter(main_cancer != "") %>% 
+    filter(main_cancer != "NoCancers") %>% 
+    # filter(stat_eval_span[1] <= first_ym) %>% 
+    # filter(first_ym <= stat_eval_span[2]) %>% 
+    mutate(main_cancer_category = if_else(str_detect(main_cancer, "_"),
+                                        "multiple",
+                                        main_cancer),
+           sex = if_else(gender ==1,
+                         "male","female")) %>% 
+    mutate(main_cancer_category = factor(main_cancer_category, levels = canc_f)) %>% 
+    select(main_cancer_category,
+           # gender,
+           ym_count,
+           age,
+           sex)  %>% 
+    left_join(df_age, by="age") %>% 
+    select(-age)
+  return(df_f)
+}
+
+
+cl <- makeCluster(12)
+clusterEvalQ(cl,{
+  require(tidyverse)
+  require(openxlsx)
+  require(data.table)
+  require(tictoc)
+})
+clusterExport(cl,
+  varlist = c(
+    "fs",
+    "read_and_extract_lim",
+    "df_age",
+    "canc_f"
+    # ,
+    # "stat_eval_span"
+  ),
+  envir = environment()
+)
+# stopCluster(cl)
+tic()
+res <- parLapply(cl,
+                 fs,
+                 read_and_extract_lim)
+toc()
+stopCluster(cl)
+```
+
+
+```{r}
+df <- data.table::rbindlist(res)
+df %>% head()
+```
+
+```{r}
+write_parquet(x = df,
+              sink="../../../../storage/r_temp/s_spaned_vis/df_cancer_cetegs_whole.parquet")
+```
+
+
+```{r}
+f_df_rds <- "../../../../storage/r_temp/s_spaned_vis/df_cancer_cetegs_whole.rds"
+df %>% 
+  saveRDS(f_df_rds)
+```
+
+
+```{r}
+t1 <- table1::table1(~ages + main_cancer_category+ym_count|sex, data = df)
+# t1
+```
+
+```{r}
+t1
+t1 %>%
+  as.data.frame() %>% 
+  DT::datatable()
+
+```
+
+
+```{r}
+write.xlsx(t1, "./table1.xlsx")
+```
+
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,379 @@
+---
+title: "r6_table_and_vis"
+output: html_document
+date: "2024-04-25"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+require(tidyverse)
+require(openxlsx)
+require(data.table)
+require(table1)
+# require(doParallel)
+require(parallel)
+require(tictoc)
+require(arrow)
+require(openxlsx)
+require(officer)
+require(ggpubr)
+require(extrafont)
+loadfonts(quiet = T)
+```
+
+
+
+# definition; ggsave2_tri, sv2ggkm
+```{r}
+
+outputdir <- "./figs/"
+if(!dir.exists(outputdir)){
+  dir.create(outputdir)
+}
+
+ggsave2_tri <- function(plot, wid = 9, hei=9){
+  plot_name <- deparse(substitute(plot))
+  
+  #png
+  file_name <- paste(outputdir,plot_name, ".png", sep = "",collapse = "")
+  ggsave(filename = file_name,plot = plot,device = "png",width = wid, height = hei,dpi = 300,units = "cm")
+  
+  
+  #pdf
+  file_name <- paste(outputdir,plot_name, ".pdf", sep = "",collapse = "")
+
+  #pptx
+  file_name <- paste(outputdir,plot_name, ".pptx", sep = "",collapse = "")
+  plot_ed <- rvg::dml(ggobj = plot,width = wid, height = hei)
+  
+  doc <- read_pptx() %>%
+    add_slide('Title and Content', 'Office Theme') %>%
+    ph_with(value = "", location = ph_location_type(type = "title")) %>%
+    ph_with(value = plot_ed, location = ph_location(type = "body",width = cm2inch(wid), height = cm2inch(hei),left = 2, top = 2))
+  doc %>%
+    print(target = file_name)
+}
+
+inch2cm <- function(x){
+  return(x/0.39370)
+}
+cm2inch <- function(x){
+  return(0.39370*x)
+}
+
+p2cm <- function(x){
+  return(as.integer(0.008466666666666667 * x))
+}
+
+cm2p <- function(x){
+  return(as.integer(118.11023622047244 *x))
+}
+
+sv2ggkm <- function(svfit, df){
+  p <- ggsurvplot(fit = svfit, data = df,
+                risk.table.title = "risk.table.title", risk.table.y.text.col = TRUE,
+           risk.table.y.text = FALSE, fontsize = 5,
+           risk.table = TRUE, tables.theme = theme_pubr(), ggtheme = theme_pubr())
+  p_km <- p$plot
+  p_tb <- p$table
+  p2 <- cowplot::plot_grid(p_km, p_tb, ncol = 1,align = "v", rel_heights = c(3,1))
+  grid::grid.draw(p2)
+  return(p2)
+}
+```
+
+
+```{r}
+stat_eval_span <- c(201301, 201512)
+```
+
+```{r}
+f_m <- "../../../ndb_pancan/dicts/code2location.csv"
+df_m <- fread(f_m)
+```
+
+
+```{r}
+# id1ns_smr_s_003
+# d_in <- "../../../../storage/d_id1c"
+d_in <- "../../../../storage/d_id1c"
+
+fs <- list.files(path = d_in ,pattern = "*.csv", full.names = T) %>% 
+  .[str_detect(.,"id1ns_smr_s_")]
+
+```
+
+
+```{r}
+l_df <- list()
+i <- 1
+for (f in fs){
+  print(f)
+  df_f <- fread(f)   %>%
+  filter(main_cancer != "") %>%
+  filter(main_cancer != "NoCancers") %>% 
+  filter(stat_eval_span[1] <= first_ym) %>%
+  filter(first_ym <= stat_eval_span[2])
+  # l_df[[i]] <- df_f
+  i <- i +1
+
+  break
+}
+
+# df <- data.table::rbindlist(l_df)%>%
+#   mutate(main_cancer_category = if_else(str_detect(main_cancer, "_"),
+#                                         "multiple",
+#                                         main_cancer))
+```
+
+```{r}
+# require(curl)
+```
+
+
+```{r}
+read_and_extract<-function(f){
+  print(f)
+  df_f <- fread(f) %>% 
+    filter(main_cancer != "") %>% 
+    filter(main_cancer != "NoCancers") %>% 
+    filter(stat_eval_span[1] <= first_ym) %>% 
+    filter(first_ym <= stat_eval_span[2]) %>% 
+    mutate(f=f) %>% 
+    mutate(main_cancer_category = if_else(str_detect(main_cancer, "_"),
+                                        "multiple",
+                                        main_cancer))
+  return(df_f)
+}
+
+
+cl <- makeCluster(12)
+clusterEvalQ(cl,{
+  require(tidyverse)
+  require(openxlsx)
+  require(data.table)
+  require(tictoc)
+})
+clusterExport(cl,
+  varlist = c(
+    "fs",
+    "read_and_extract",
+    "stat_eval_span"
+  ),
+  envir = environment()
+)
+# stopCluster(cl)
+res <- parLapply(cl,
+                 fs,
+                 read_and_extract)
+
+stopCluster(cl)
+```
+
+
+```{r}
+df <- data.table::rbindlist(res)
+df %>% head()
+```
+
+```{r}
+write_parquet(x = df,
+              sink="../../../../storage/r_temp/s_spaned_vis/df_cancer_cetegs.parquet")
+```
+
+
+```{r}
+f_df_rds <- "../../../../storage/r_temp/s_spaned_vis/df_cancer_cetegs.rds"
+df %>% 
+  saveRDS(f_df_rds)
+```
+
+
+```{r}
+f_mst <- "../S767_master_integration/dat/CI5-XII/cancer_summary.txt"
+df_m <- fread(f_mst) 
+# %>% 
+#   mutate(CANCER = as.character(CANCER))
+
+# df_m<- readr::read_lines(f_mst) %>% 
+#   data.frame(rw = .) %>% 
+#   mutate(top = str_extract(rw, "^[0-9]*")) %>% 
+#   mutate(r2 = str_remove(rw, "^[0-9]*")) %>% 
+#   mutate(s2 = if_else(str_detect(r2, "^ [A-Z]."),
+#                       str_remove(r2, "^ "),
+#                       NA_character_),
+#          s3 = if_else(str_detect(r2, "^ \t"),
+#                       str_remove(r2, "^ \t"),
+#                       NA_character_)) %>% 
+#   mutate(d3 = str_extract(r2, "\\([-\\–a-zA-Z0-9\\.\\,\\+ ]*\\)"))
+# # df_m <- fread(f_mst, encoding = "cp1252")
+```
+
+```{r}
+
+```
+jp tag:439200099
+```{r}
+f <- "../S767_master_integration/dat/CI5-XII/cases.csv"
+df_j_org <- readr::read_csv(f, col_names = T) %>% 
+  filter(REGISTRY == 439200099) %>% 
+  select(CANCER, SEX, TOTAL) %>% 
+  rename(sex = SEX,
+       n_case = TOTAL)
+df_j <- df_j_org%>% 
+  group_by(sex, CANCER) %>% 
+  summarise(n=sum(n_case)) %>% 
+  left_join(df_m, by="CANCER") %>% 
+  mutate(origin="CI5") %>% 
+  # filter(!is.na(LABEL)) %>% 
+  mutate(CANCER = as.character(CANCER)) %>% 
+  filter(as.numeric(CANCER) < 61)
+
+```
+
+```{r}
+# df %>% head()
+```
+
+
+```{r}
+# df %>% head()
+df %>% 
+  filter(main_cancer_category == "Colon") %>% head()
+
+df_j_ndb <- df %>% 
+  group_by(main_cancer_category,gender) %>% 
+  summarize(n=n()) %>% 
+  mutate(origin="NDB") %>% 
+  rename(sex = gender,
+         CANCER = main_cancer_category) %>% 
+  mutate(LABEL = CANCER)
+
+
+
+```
+
+```{r}
+l_order <- df_m %>% 
+  filter(CANCER < 61) %>% 
+  .[["LABEL"]] %>% 
+  c(., "multiple")
+df_ci_ndb <- bind_rows(df_j, df_j_ndb)%>% 
+  mutate(sex =if_else(sex==1,
+                      "male",
+                      "female")) %>% 
+  mutate(organ = factor(LABEL, levels=rev(l_order)))
+
+# l_order
+```
+
+```{r}
+p_span <- ggplot()+theme_pubr(base_family = "Times")+
+  geom_bar(data = df_ci_ndb,
+           aes(x=LABEL, y=n, fill=sex),color="black",stat="identity", position="dodge")+
+  facet_wrap(~origin, nrow = 1)+coord_flip()
+p_span
+
+# df_ci_ndb$organ
+```
+
+
+
+
+```{r}
+ggsave2_tri(p_span, wid = 15, hei=25)
+```
+
+
+```{r}
+require(ggrepel)
+df_ci_ndb_total <- df_ci_ndb %>% 
+  group_by(organ, origin) %>% 
+  summarize(n=sum(n)) %>% 
+  filter(organ != "multiple")  %>% 
+  pivot_wider(names_from = origin, values_from = n) %>% 
+  mutate(CI5 = if_else(is.na(CI5),
+                       0,
+                       CI5))
+
+
+p_scat <- ggplot()+theme_pubr(base_family = "Times")+
+  theme(aspect.ratio = 1)+
+  geom_abline(slope = 1, intercept = 0)+
+  geom_text_repel(
+      data=df_ci_ndb_total,
+       aes(x = CI5+1, y=NDB+1, label=organ),
+      seed = 1, box.padding = 0.5, min.segment.length = 0, max.overlaps = Inf,
+      family="Times"
+  )+
+  geom_point(data=df_ci_ndb_total,
+             aes(x = CI5+1, y=NDB+1))+
+  scale_x_log10()+scale_y_log10()
+p_scat
+  # tidyr::fill(CI5, 0)
+
+
+```
+
+```{r}
+p_scat0 <- ggplot()+theme_pubr(base_family = "Times")+
+  theme(aspect.ratio = 1)+
+  geom_abline(slope = 1, intercept = 0)+
+  geom_text_repel(
+      data=df_ci_ndb_total,
+       aes(x = CI5, y=NDB, label=organ),
+      seed = 1, box.padding = 0.5, min.segment.length = 0, max.overlaps = Inf,
+      family="Times"
+  )+
+  geom_point(data=df_ci_ndb_total,
+             aes(x = CI5, y=NDB))+
+  scale_x_log10()+scale_y_log10()
+p_scat0
+
+ggsave2_tri(p_scat0, wid = 25, hei=25)
+```
+
+
+
+```{r}
+df_smr_meta <- data.frame(spearman = cor(df_ci_ndb_total$CI5, 
+                                         df_ci_ndb_total$NDB, method = "spearman"),
+                          pearson = cor(df_ci_ndb_total$CI5, 
+                                        df_ci_ndb_total$NDB, method = "pearson")
+)
+
+df_smr_meta %>% DT::datatable()
+
+df_smr_meta %>% write.xlsx("./figs/df_smr_meta.xlsx", overwrite = T)
+```
+
+
+
+```{r}
+ggsave2_tri(p_scat, wid = 25, hei=25)
+```
+
+```{r}
+p_scat_lim <- p_scat+
+  coord_cartesian(xlim=c(100, 5e+5),
+                  ylim=c(100, 5e+5))
+p_scat_lim 
+
+ggsave2_tri(p_scat_lim, wid = 25, hei=25)
+```
+
+
+```{r}
+# p_span_log <- ggplot()+theme_pubr()+
+#   geom_bar(data = df_ci_ndb,
+#            aes(x=Organ, y=n+1, fill=sex),color="black",stat="identity", position="dodge")+
+#   facet_wrap(~origin, nrow = 1)+coord_flip()+scale_y_log10()
+# p_span_log
+```
+
+
+```{r}
+sessionInfo()
+```
+

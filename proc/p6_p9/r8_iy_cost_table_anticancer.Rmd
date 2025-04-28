@@ -1,0 +1,385 @@
+---
+title: "r8_iy_cost_table"
+author: "fk506cni"
+date: "2024-10-10"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r}
+require(tidyverse)
+require(openxlsx)
+require(data.table)
+require(table1)
+# require(doParallel)
+require(parallel)
+require(tictoc)
+require(arrow)
+require(openxlsx)
+require(officer)
+require(ggpubr)
+require(extrafont)
+loadfonts(quiet = T)
+```
+
+
+# definition; ggsave2_tri, sv2ggkm
+```{r}
+
+outputdir <- "./figs/"
+if(!dir.exists(outputdir)){
+  dir.create(outputdir)
+}
+
+ggsave2_tri <- function(plot, wid = 9, hei=9){
+  plot_name <- deparse(substitute(plot))
+  
+  #png
+  file_name <- paste(outputdir,plot_name, ".png", sep = "",collapse = "")
+  ggsave(filename = file_name,plot = plot,device = "png",width = wid, height = hei,dpi = 300,units = "cm")
+  
+  
+  #pdf
+  file_name <- paste(outputdir,plot_name, ".pdf", sep = "",collapse = "")
+
+  #pptx
+  file_name <- paste(outputdir,plot_name, ".pptx", sep = "",collapse = "")
+  plot_ed <- rvg::dml(ggobj = plot,width = wid, height = hei)
+  
+  doc <- read_pptx() %>%
+    add_slide('Title and Content', 'Office Theme') %>%
+    ph_with(value = "", location = ph_location_type(type = "title")) %>%
+    ph_with(value = plot_ed, location = ph_location(type = "body",width = cm2inch(wid), height = cm2inch(hei),left = 2, top = 2))
+  doc %>%
+    print(target = file_name)
+}
+
+ggsave2_tri_file <- function(plot,filename, wid = 9, hei=9){
+  plot_name <- deparse(substitute(plot))
+  
+  #png
+  file_name <- paste(outputdir,filename, ".png", sep = "",collapse = "")
+  ggsave(filename = file_name,plot = plot,device = "png",width = wid, height = hei,dpi = 300,units = "cm")
+  
+  
+  #pdf
+  file_name <- paste(outputdir, filename, ".pdf", sep = "",collapse = "")
+
+  #pptx
+  file_name <- paste(outputdir, filename, ".pptx", sep = "",collapse = "")
+  plot_ed <- rvg::dml(ggobj = plot,width = wid, height = hei)
+  
+  doc <- read_pptx() %>%
+    add_slide('Title and Content', 'Office Theme') %>%
+    ph_with(value = "", location = ph_location_type(type = "title")) %>%
+    ph_with(value = plot_ed, location = ph_location(type = "body",width = cm2inch(wid), height = cm2inch(hei),left = 2, top = 2))
+  doc %>%
+    print(target = file_name)
+}
+
+
+inch2cm <- function(x){
+  return(x/0.39370)
+}
+cm2inch <- function(x){
+  return(0.39370*x)
+}
+
+p2cm <- function(x){
+  return(as.integer(0.008466666666666667 * x))
+}
+
+cm2p <- function(x){
+  return(as.integer(118.11023622047244 *x))
+}
+
+sv2ggkm <- function(svfit, df){
+  p <- ggsurvplot(fit = svfit, data = df,
+                risk.table.title = "risk.table.title", risk.table.y.text.col = TRUE,
+           risk.table.y.text = FALSE, fontsize = 5,
+           risk.table = TRUE, tables.theme = theme_pubr(), ggtheme = theme_pubr())
+  p_km <- p$plot
+  p_tb <- p$table
+  p2 <- cowplot::plot_grid(p_km, p_tb, ncol = 1,align = "v", rel_heights = c(3,1))
+  grid::grid.draw(p2)
+  return(p2)
+}
+```
+
+
+```{r}
+f_m <- "../../../ndb_pancan/dicts/code2location.csv"
+df_m <- fread(f_m)
+
+f_mst <- "../S767_master_integration/dat/CI5-XII/cancer_summary.txt"
+df_m <- fread(f_mst) %>% 
+  filter(CANCER <= 60)
+canc_f <- c(df_m$LABEL, "multiple")
+```
+
+```{r}
+f_iy_master <- "../../dicts/ndb_master_creation-main/appendix/dfmeta_iy_20231122_150053_929635.xlsx"
+df_iy_master <- readxl::read_excel(f_iy_master)
+```
+
+
+```{r}
+d_in <- "../../../../storage/smr_iy_res/"
+# /id1ns_cost_s_000.csv
+fs <- list.files(path = d_in ,pattern = "*.csv", full.names = T) %>% 
+  sort() %>% 
+  .[str_detect(.,"iy_cost_dict_limit_fix_")]
+# %>%
+#   .[1:2]
+fs
+# %>% 
+#   .[str_detect(.,"id1ns_smr_cost_s_")]
+```
+
+```{r}
+l_use_smr <- list()
+for(i in 1:length(fs)){
+  f <- fs[[i]]
+  print(f)
+  df_f <- fread(f) %>%
+      mutate(ym = ymd %>% 
+             as.character() %>% 
+             str_sub(1,6),
+             used_price = use * price) %>% 
+      filter(use != 0) %>%
+      group_by(ym, cancer, drugcode) %>%
+      summarise(ym_price = sum(used_price), ym_use = sum(use), mean_price = mean(price))
+  l_use_smr[[i]] <- df_f
+}
+
+df_whole <- data.table::rbindlist(l_use_smr) %>% 
+  mutate(drugcode = as.character(drugcode))
+# df_f <- fread(fs[1]) %>%
+#     mutate(ym = ymd %>% 
+#              as.character() %>% 
+#              str_sub(1,6),
+#            used_price = use * price) %>% 
+#   filter(use != 0) %>%
+#   group_by(ym, cancer, drugcode) %>%
+#   summarise(ym_price = sum(used_price), ym_use = sum(use), mean_price = mean(price))
+#   
+
+# df_f_0 <- df_f %>% filter(
+#   ymd == 20130231
+# )
+df_whole %>% head()
+```
+
+```{r}
+df_whole_y <- df_whole %>% 
+  mutate(y=str_sub(ym, 1, 4)) %>% 
+  group_by(drugcode, y) %>% 
+  summarise(y_use = sum(ym_use)) %>% 
+  left_join(
+    df_iy_master %>% 
+      rename(drugcode = c2) %>% 
+      mutate(drugcode = as.character(drugcode)),
+        by = "drugcode") 
+
+df_whole_y
+```
+
+```{r}
+df_whole_y %>% 
+  write.xlsx(., "./figs/df_whole_y.xlsx", overwrite = T)
+```
+
+
+```{r}
+f_atc <- "../../dicts/df_atc_dc_20241128_164517_686885.parquet"
+df_atc <- arrow::read_parquet(f_atc) %>% 
+  rename(dcode=code) %>% 
+  mutate(dig3=str_sub(atc,1,3)) %>% 
+  filter(dig3 != "L04")
+
+f_dnc <- "../../dicts/df_names_whole_eng_20241128_164517_686885.parquet"
+df_dnc <- arrow::read_parquet(f_dnc) %>% 
+  mutate(contents = str_remove_all(contents," \\[") %>% 
+           str_remove_all(., "\\]") %>% 
+           str_remove_all(.,"DG\\:DG[0-9]*"))
+
+# f_yjk <- "../../dicts/df_yj4_jpn_20240807_110239_962086.xlsx"
+# df_yjk <- readxl::read_excel(f_yjk)
+
+f_yj4kg <- "../../dicts/yj7_to_kegg_drug.csv"
+df_yjk2 <- readr::read_csv(f_yj4kg, skip = 1, col_names = F) %>% 
+  rename(yj7 = X2,
+         labels = X3) %>% 
+  mutate(yj7 = as.character(yj7)) %>% 
+  mutate(dcode = str_extract(labels, "^D[0-9]*")) %>% 
+  select(dcode, yj7, labels)
+
+df_yjatc <- df_yjk2 %>% 
+  left_join(df_atc, by = "dcode",relationship = "many-to-many")  %>% 
+  mutate(code = str_sub(atc, 1,5))  %>%
+  left_join(df_dnc, by="code")  %>%
+  select(yj7, code)
+#   filter(is.na(code))
+
+# %>% 
+#   distinct()
+
+
+f_mst <- "../../dicts/ndb_master_creation-main/appendix/dfmeta_iy_20240623_112942_859217.xlsx"
+df_mst <- readxl::read_excel(f_mst)
+
+
+
+df_categ <- df_mst %>% 
+  mutate(c2 = as.character(c2),
+         c31 = as.character(c31)) %>% 
+  mutate(yj7 = str_sub(c31, 1,7),
+         yj4 = str_sub(c31, 1,4),
+         yj2 = str_sub(c31, 1,2)) %>% 
+  filter(yj2=="42") %>% 
+  left_join(df_yjatc, by = "yj7",relationship = "many-to-many") %>% 
+  rename(drugcode=c2)
+
+df_categ %>% filter(is.na(code)) %>% DT::datatable()
+
+df_categ_out <- df_categ %>% filter(is.na(code))
+df_categ_in <-  df_categ %>% filter(!is.na(code)) %>% filter(!is.na(drugcode))
+
+df_categ_in$drugcode %>% .[duplicated(.)]
+write.xlsx(df_categ_out, "../../dicts/df_categ_out.xlsx", overwrite = T)
+
+# dcs <- df_whole$drugcode %>% as.character() %>% unique()
+# dcs %>% .[!. %in% as.character(df_mst$c2)]
+# rep("c", 16) %>% str_c(collapse = "",sep="")
+```
+
+
+```{r}
+df_whole_calc <- df_whole %>% 
+  left_join(df_categ_in, by = "drugcode",relationship = "many-to-many") %>% 
+  filter(!is.na(code)) %>% 
+  group_by(cancer, ym, code) %>% 
+  summarise(n=n(), total_price = sum(ym_price)) %>%
+  left_join(df_dnc, by="code") %>% 
+  mutate(ymd = str_c(ym, "15", sep="") %>% ymd()) 
+# %>% 
+  # mutate(total_price = 10 * total_price)
+df_whole_calc %>% head()
+df_whole_calc$cancer %>% unique()
+```
+
+```{r}
+
+targets <- c("Lung (incl. trachea and bronchus)",
+             "Colon",
+             "Breast",
+             "Stomach",
+             "Prostate")
+
+for(i in 1:length(targets)){
+  tag <- targets[[i]]
+  f_out <- str_c("cost_dist_", tag, sep = "", collapse = "")
+  print(tag)
+  
+  df_whole_calc_sub_total <- df_whole_calc %>% 
+    filter(cancer ==tag) %>% 
+    group_by(ymd) %>% 
+    summarise(total_price = sum(total_price))
+  df_whole_calc_sub <- df_whole_calc %>% 
+    filter(cancer ==tag) %>% 
+    group_by(code) %>% 
+    mutate(group_use =sum(n),
+           group_price = sum(total_price)) %>% 
+    ungroup() %>% 
+    filter(total_price > 1e+8)
+  
+  p_sub <- ggplot()+theme_pubr(base_family = "Times", legend = "right")+
+    geom_line(data = df_whole_calc_sub,
+              aes(x=ymd, 
+                  y=total_price,
+                  color=contents))+
+    geom_line(data = df_whole_calc_sub_total,
+            aes(x=ymd, 
+                y=total_price),
+                color="black")+
+    xlab("time")+ylab("yen")+ggtitle(tag)
+  grid::grid.draw(p_sub)
+  
+  ggsave2_tri_file(plot = p_sub, filename = f_out, wid = 28, hei=12)
+}
+
+```
+
+```{r}
+df_whole_calc_total_tag <- df_whole_calc %>% 
+  filter(cancer %in% targets) %>% 
+  group_by(cancer, ymd) %>% 
+  summarise(total_price = sum(total_price))
+
+df_whole_calc_sub_tag <- df_whole_calc %>% 
+    filter(cancer %in% targets) %>% 
+    group_by(cancer,code) %>% 
+    mutate(group_use =sum(n),
+           group_price = sum(total_price)) %>% 
+    ungroup() %>% 
+    filter(total_price > 1e+8)
+
+
+px <- ggplot()+theme_pubr(base_family = "Times", legend = "right")+
+    geom_line(data = df_whole_calc_sub_tag,
+              aes(x=ymd, 
+                  y=total_price,
+                  color=contents))+
+    geom_line(data = df_whole_calc_total_tag,
+            aes(x=ymd, 
+                y=total_price),
+                color="black")+
+    xlab("time")+ylab("yen")+ggtitle("CTx burden")+labs(color = "ATC")+
+  guides(color=guide_legend(ncol=1))+
+  facet_wrap(~cancer, ncol = 1,scale="free")
+
+px
+
+ggsave2_tri(px, wid = 28, hei = 28)
+```
+
+
+
+```{r}
+df_whole_cancer <- df_whole_calc %>% 
+  group_by(contents, ymd) %>% 
+  summarise(total_price = sum(total_price)) %>% 
+  group_by(contents) %>% 
+  mutate(cont_total = sum(total_price)) %>% 
+  filter(2e+11<cont_total) %>% 
+  ungroup() %>% 
+  tidyr::complete(contents, ymd, fill = list(total_price=0))
+
+
+df_whole_cancer %>% write.xlsx("./figs/df_whole_cancers.xlsx")
+# df_whole_cancer$cont_total %>% MASS::truehist()
+
+px_ant <- ggplot()+theme_pubr(base_family = "Times", legend = "right")+
+    geom_line(data = df_whole_cancer,
+              aes(x=ymd, 
+                  y=total_price,
+                  color=contents))+
+    xlab("time")+ylab("yen")+ggtitle("CTx burden")+labs(color = "ATC")+
+  guides(color=guide_legend(ncol=1))
+# +
+#   facet_wrap(~cancer, ncol = 1,scale="free")
+
+px_ant
+
+ggsave2_tri(px_ant, wid = 26, hei = 12)
+# df_whole_calc %>% head()
+```
+
+
+```{r}
+sessionInfo()
+```
+
+
